@@ -1,0 +1,12 @@
+[project]
+name = "secrets-in-archives"
+version = "0.1.0"
+description = "Pipeline to extract archives from R2, scan for secrets with TruffleHog, and store results in PostgreSQL"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.42.18",
+    "psycopg2-binary>=2.9.11",
+    "python-dotenv>=1.2.1",
+    "rarfile>=4.2",
+]
