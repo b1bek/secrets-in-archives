@@ -53,7 +53,8 @@ def process_file(r2_client, db_manager, file_key, file_hash, file_size):
         db_manager.update_file_status(file_hash, file_key, 'completed')
             
     except Exception as e:
-        print(f"Error processing {file_key}: {e}")
+        print(f"CRITICAL ERROR processing {file_key}: {e}")
+        sys.exit(1)
     finally:
         # 5. Cleanup
         cleanup(local_file)
