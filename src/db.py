@@ -8,13 +8,42 @@ class DatabaseManager:
         self.conn = None
 
     def __enter__(self):
-        self.conn = psycopg2.connect(self.db_url)
-        self.init_db()
+        self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.conn:
-            self.conn.close()
+            try:
+                self.conn.close()
+            except:
+                pass
+
+    def connect(self):
+        """Establish or re-establish database connection"""
+        if self.conn and not self.conn.closed:
+            return
+        
+        try:
+            self.conn = psycopg2.connect(self.db_url)
+            self.init_db()
+        except psycopg2.Error as e:
+            print(f"Failed to connect to database: {e}")
+            raise
+
+    def ensure_connection(self):
+        """Check if connection is alive, reconnect if needed"""
+        if self.conn is None or self.conn.closed:
+            print("Database connection closed. Reconnecting...")
+            self.connect()
+            return
+
+        # Optional: Active check
+        try:
+            with self.conn.cursor() as c:
+                c.execute('SELECT 1')
+        except psycopg2.Error:
+            print("Database connection lost. Reconnecting...")
+            self.connect()
 
     def init_db(self):
         try:
@@ -39,7 +68,7 @@ class DatabaseManager:
                 
                 self.conn.commit()
         except psycopg2.Error as e:
-            self.conn.rollback()
+            self._safe_rollback()
             print(f"Database initialization error: {e}")
 
     def is_file_processed(self, file_hash):
@@ -47,17 +76,19 @@ class DatabaseManager:
 
     def get_file_status(self, file_hash):
         try:
+            self.ensure_connection()
             with self.conn.cursor() as c:
                 c.execute("SELECT status FROM processed_files WHERE file_hash = %s", (file_hash,))
                 row = c.fetchone()
                 return row[0] if row else None
         except psycopg2.Error as e:
-            self.conn.rollback()
+            self._safe_rollback()
             print(f"Error getting file status for {file_hash}: {e}")
             return None
 
     def update_file_status(self, file_hash, filename, status):
         try:
+            self.ensure_connection()
             with self.conn.cursor() as c:
                 c.execute("""
                     INSERT INTO processed_files (file_hash, filename, status, processed_at) 
@@ -67,7 +98,7 @@ class DatabaseManager:
                 """, (file_hash, filename, status))
                 self.conn.commit()
         except psycopg2.Error as e:
-            self.conn.rollback()
+            self._safe_rollback()
             print(f"Error updating status for {filename}: {e}")
 
     def save_finding(self, filename, json_line):
@@ -79,6 +110,7 @@ class DatabaseManager:
             detector_name = data.get('DetectorName', 'Unknown')
             raw_secret = data.get('Raw', data.get('rawSecret', ''))
             
+            self.ensure_connection()
             with self.conn.cursor() as c:
                 c.execute("""INSERT INTO scan_results (detector_name, raw_secret, raw_json) 
                              VALUES (%s, %s, %s)
@@ -90,42 +122,13 @@ class DatabaseManager:
         except json.JSONDecodeError:
             print(f"Failed to decode JSON: {json_line[:50]}...", flush=True)
         except psycopg2.Error as e:
-            self.conn.rollback()
+            self._safe_rollback()
             print(f"Database transaction error: {e}", flush=True)
 
-    def save_results(self, filename, scan_output):
-        count = 0
-        
-        # Split lines first
-        lines = [line for line in scan_output.strip().split('\n') if line]
-        values_to_insert = []
-
-        for line in lines:
+    def _safe_rollback(self):
+        """Attempt to rollback, ignoring connection errors"""
+        if self.conn and not self.conn.closed:
             try:
-                data = json.loads(line)
-                detector_name = data.get('DetectorName', 'Unknown')
-                raw_secret = data.get('Raw', data.get('rawSecret', ''))
-                
-                values_to_insert.append((detector_name, raw_secret, line))
-            except json.JSONDecodeError:
-                continue
-        
-        if not values_to_insert:
-            print(f"No valid findings to save for {filename}")
-            return
-
-        try:
-            with self.conn.cursor() as c:
-                # Use executemany for batch insertion - much faster!
-                c.executemany("""INSERT INTO scan_results (detector_name, raw_secret, raw_json) 
-                                 VALUES (%s, %s, %s)
-                                 ON CONFLICT (raw_secret) DO NOTHING""",
-                              values_to_insert)
-                
-                count = len(values_to_insert)
-                self.conn.commit()
-                print(f"Saved {count} new findings for {filename}")
-                
-        except psycopg2.Error as e:
-            self.conn.rollback()
-            print(f"Database transaction error: {e}")
+                self.conn.rollback()
+            except psycopg2.Error:
+                pass
