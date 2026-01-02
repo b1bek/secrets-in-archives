@@ -21,7 +21,7 @@ class Scanner:
                 break
             if line:
                 line_str = line.strip()
-                print(line_str) # Stream to console
+                # print(line_str) # Suppressed console output
                 yield line_str
 
         # Check for errors
