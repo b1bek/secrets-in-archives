@@ -59,6 +59,12 @@ def process_file(r2_client, db_manager, file_key, file_hash, file_size):
         # 5. Cleanup
         cleanup(local_file)
         cleanup(extract_dir)
+        
+        # Verify cleanup
+        if os.path.exists(local_file) or os.path.exists(extract_dir):
+            print(f"CRITICAL ERROR: Failed to clean up {file_key}. Exiting to prevent disk overflow.")
+            sys.exit(1)
+            
         print(f"Cleaned up {file_key}")
 
 def main():
